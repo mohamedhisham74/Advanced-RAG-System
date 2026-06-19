@@ -2,10 +2,10 @@ version: "3.9"
 
 services:
 
-  # ── PostgreSQL + pgvector ────────────────────────────────────────────────
+  # ── PostgreSQL + pgvector ─────────────────────────────────────────────────
   db:
     image: pgvector/pgvector:pg16
-    container_name: rag_db
+    container_name: tax_rag_db
     restart: unless-stopped
     environment:
       POSTGRES_USER:     postgres
@@ -13,19 +13,19 @@ services:
       POSTGRES_DB:       ragdb
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      - ./init_db.sql:/docker-entrypoint-initdb.d/10_init.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ragdb"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
 
-  # ── FastAPI application ──────────────────────────────────────────────────
+  # ── FastAPI application ───────────────────────────────────────────────────
   api:
     build: .
-    container_name: rag_api
+    container_name: tax_rag_api
     restart: unless-stopped
     env_file: .env
     environment:
@@ -36,8 +36,8 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./data:/app/data        # persist uploaded PDFs
-      - ./static:/app/static    # live-reload frontend changes
+      - ./data:/app/data          # persist uploaded files across restarts
+      - ./static:/app/static      # live-edit frontend without rebuild
 
 volumes:
   pgdata:

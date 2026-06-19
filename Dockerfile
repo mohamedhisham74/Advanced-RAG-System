@@ -1,16 +1,19 @@
 FROM python:3.11-slim
 
-# System deps for PyMuPDF
+# PyMuPDF needs libmupdf system libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libmupdf-dev \
+        libmupdf-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Install Python dependencies first (layer cached unless requirements change)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy application source
+COPY app/     ./app/
+COPY static/  ./static/
 
 EXPOSE 8000
 

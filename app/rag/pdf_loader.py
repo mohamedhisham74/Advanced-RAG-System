@@ -1,24 +1,9 @@
 """
-PDF Loader — English PDF text extraction and cleaning.
+PDF Loader — extract and clean text from English legal PDFs.
 
-Responsibility:
-    - Extract text from English PDFs using PyMuPDF (fitz)
-    - Clean whitespace and normalize line breaks
-    - Parse document metadata from filename and content headers
-    - Save processed text to data/tax_knowledge_base/processed/
-
-Input:
-    PDF files from data/tax_knowledge_base/raw/
-
-Output:
-    List of ProcessedDocument dicts:
-    {
-        "document_name": str,   # e.g. "Income Tax Law"
-        "law_number":    str,   # e.g. "Law No. 91 of 2005"
-        "source_file":   str,   # original PDF filename
-        "raw_text":      str,   # full extracted + cleaned text
-        "pages":         int,   # page count
-    }
+Input:  PDF files
+Output: ProcessedDocument dicts
+        { document_name, law_number, source_file, raw_text, pages }
 
 Library: PyMuPDF (fitz) — reliable cross-platform PDF extraction
 """
@@ -48,12 +33,11 @@ _LAW_HEADER = re.compile(r"^LAW_NUMBER:\s*(.+)$", re.MULTILINE)
 
 
 def load_pdf(file_path: str) -> dict:
+    """Extract and clean text from a single PDF. Returns ProcessedDocument dict."""
     path = Path(file_path)
 
     if not path.exists():
         raise FileNotFoundError(f"PDF not found: {file_path}")
-
-    logger.info("Loading PDF: %s", path.name)
 
     try:
         doc = fitz.open(str(path))
@@ -61,17 +45,16 @@ def load_pdf(file_path: str) -> dict:
         raise RuntimeError(f"PyMuPDF failed to open {path.name}: {exc}") from exc
 
     pages_text: list[str] = []
-
     for page in doc:
-        page_text = page.get_text("text", sort=True)
-        if page_text.strip():
-            pages_text.append(page_text)
-
+        text = page.get_text("text", sort=True)
+        if text.strip():
+            pages_text.append(text)
     doc.close()
 
-    raw_text = "\n\n".join(pages_text)
-    cleaned  = clean_text(raw_text)
-    metadata = extract_document_metadata(cleaned, path.name)
+    cleaned  = clean_text("\n\n".join(pages_text))
+    metadata = _extract_metadata(cleaned, path.name)
+
+    logger.info("Loaded %s — %d pages, %d chars", path.name, len(pages_text), len(cleaned))
 
     return {
         "document_name": metadata["document_name"],
@@ -83,13 +66,13 @@ def load_pdf(file_path: str) -> dict:
 
 
 def load_all_pdfs(raw_dir: str) -> list[dict]:
+    """Load all PDFs from a directory. Skips unreadable files with a warning."""
     raw_path = Path(raw_dir)
 
     if not raw_path.exists():
-        raise FileNotFoundError(f"Raw directory not found: {raw_dir}")
+        raise FileNotFoundError(f"Directory not found: {raw_dir}")
 
     pdf_files = sorted(raw_path.glob("*.pdf"))
-
     if not pdf_files:
         logger.warning("No PDF files found in %s", raw_dir)
         return []
@@ -101,6 +84,7 @@ def load_all_pdfs(raw_dir: str) -> list[dict]:
         except Exception as exc:
             logger.error("Skipping %s: %s", pdf_path.name, exc)
 
+    logger.info("Loaded %d / %d PDFs", len(documents), len(pdf_files))
     return documents
 
 
@@ -110,42 +94,42 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def extract_document_metadata(text: str, filename: str) -> dict:
+def _extract_metadata(text: str, filename: str) -> dict:
+    """Parse document name and law number from text headers or filename."""
     document_name = ""
     law_number    = ""
 
-    doc_match = _DOC_HEADER.search(text)
-    if doc_match:
-        document_name = doc_match.group(1).strip()
+    m = _DOC_HEADER.search(text)
+    if m:
+        document_name = m.group(1).strip()
 
-    law_header_match = _LAW_HEADER.search(text)
-    if law_header_match:
-        law_number = law_header_match.group(1).strip()
-
-    if not law_number:
-        law_match = _LAW_NUM_PATTERN.search(text[:600])
-        if law_match:
-            law_number = law_match.group(0).strip()
+    m = _LAW_HEADER.search(text)
+    if m:
+        law_number = m.group(1).strip()
 
     if not law_number:
-        law_match = _LAW_NUM_PATTERN.search(filename)
-        if law_match:
-            law_number = law_match.group(0).strip()
+        m = _LAW_NUM_PATTERN.search(text[:600])
+        if m:
+            law_number = m.group(0).strip()
+
+    if not law_number:
+        m = _LAW_NUM_PATTERN.search(filename)
+        if m:
+            law_number = m.group(0).strip()
 
     if not document_name:
         stem = Path(filename).stem
-        stem = re.sub(r"\s*\d+$", "", stem)
-        document_name = stem.strip()
+        document_name = re.sub(r"\s*\d+$", "", stem).strip()
 
     return {"document_name": document_name, "law_number": law_number}
 
 
 def save_processed_text(document: dict, processed_dir: str) -> str:
+    """Persist a ProcessedDocument's text to processed/ as a .txt file."""
     processed_path = Path(processed_dir)
     processed_path.mkdir(parents=True, exist_ok=True)
 
-    stem        = Path(document["source_file"]).stem
-    output_file = processed_path / f"{stem}.txt"
+    output_file = processed_path / f"{Path(document['source_file']).stem}.txt"
 
     header = (
         f"DOCUMENT: {document['document_name']}\n"

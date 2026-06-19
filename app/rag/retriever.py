@@ -1,8 +1,8 @@
 """
-Retriever — Cosine Similarity Search from pgvector.
+Retriever — cosine similarity search against pgvector.
 
-Runs multi-embedding retrieval, deduplicates by chunk_id,
-keeping the highest similarity score per chunk.
+retrieve()       → single embedding query
+retrieve_multi() → multiple embeddings, deduplicated by chunk_id (best score kept)
 """
 
 from __future__ import annotations
@@ -33,20 +33,20 @@ _RETRIEVE_SQL = text("""
 
 async def retrieve(
     query_embedding: list[float],
-    db_session: AsyncSession,
+    db: AsyncSession,
     top_k: int = 5,
     threshold: float = 0.70,
 ) -> list[dict]:
-    vector_str = _format_vector(query_embedding)
-
+    """Return top_k chunks above the similarity threshold for a single embedding."""
+    vector_str = _fmt_vector(query_embedding)
     try:
-        result = await db_session.execute(
+        result = await db.execute(
             _RETRIEVE_SQL,
             {"embedding": vector_str, "threshold": threshold, "top_k": top_k},
         )
         rows = result.mappings().all()
     except Exception as exc:
-        logger.error("pgvector retrieve failed: %s", exc)
+        logger.error("pgvector query failed: %s", exc)
         return []
 
     return [_row_to_chunk(row) for row in rows]
@@ -54,25 +54,35 @@ async def retrieve(
 
 async def retrieve_multi(
     query_embeddings: list[list[float]],
-    db_session: AsyncSession,
+    db: AsyncSession,
     top_k: int = 5,
     threshold: float = 0.70,
 ) -> list[dict]:
+    """
+    Retrieve and deduplicate chunks across multiple query embeddings.
+    Runs queries sequentially (AsyncSession does not support concurrent ops).
+    """
     if not query_embeddings:
         return []
 
     all_chunks: list[dict] = []
     for i, emb in enumerate(query_embeddings):
         try:
-            chunks = await retrieve(emb, db_session, top_k, threshold)
+            chunks = await retrieve(emb, db, top_k, threshold)
             all_chunks.extend(chunks)
         except Exception as exc:
             logger.warning("retrieve_multi: embedding[%d] failed: %s", i, exc)
 
-    return deduplicate_chunks(all_chunks)
+    deduped = _deduplicate(all_chunks)
+    logger.debug(
+        "retrieve_multi: %d embeddings → %d raw → %d deduped",
+        len(query_embeddings), len(all_chunks), len(deduped),
+    )
+    return deduped
 
 
-def deduplicate_chunks(chunks: list[dict]) -> list[dict]:
+def _deduplicate(chunks: list[dict]) -> list[dict]:
+    """Keep the highest similarity score per chunk_id, return sorted desc."""
     best: dict[str, dict] = {}
     for chunk in chunks:
         cid   = chunk["chunk_id"]
@@ -82,12 +92,13 @@ def deduplicate_chunks(chunks: list[dict]) -> list[dict]:
     return sorted(best.values(), key=lambda c: c.get("similarity", 0.0), reverse=True)
 
 
-def _format_vector(embedding: list[float]) -> str:
+def _fmt_vector(embedding: list[float]) -> str:
     return "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
 
 
 def _row_to_chunk(row) -> dict:
     import json as _json
+
     metadata = row["metadata"]
     if isinstance(metadata, str):
         try:

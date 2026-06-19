@@ -1,148 +1,144 @@
 'use strict';
 
-const API = '';  // same origin
-
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const messagesEl   = document.getElementById('messages');
-const queryInput   = document.getElementById('queryInput');
-const sendBtn      = document.getElementById('sendBtn');
-const uploadArea   = document.getElementById('uploadArea');
-const fileInput    = document.getElementById('fileInput');
-const uploadBtn    = document.getElementById('uploadBtn');
-const uploadStatus = document.getElementById('uploadStatus');
+// ─── DOM ──────────────────────────────────────────────────────────────────────
+const uploadZone    = document.getElementById('uploadZone');
+const fileInput     = document.getElementById('fileInput');
+const uploadName    = document.getElementById('uploadName');
+const uploadBtn     = document.getElementById('uploadBtn');
+const uploadBtnText = document.getElementById('uploadBtnText');
 const uploadSpinner = document.getElementById('uploadSpinner');
-const chunkCount   = document.getElementById('chunkCount');
-const refreshStats = document.getElementById('refreshStats');
-const topK         = document.getElementById('topK');
-const threshold    = document.getElementById('threshold');
-const rerankTopN   = document.getElementById('rerankTopN');
+const uploadMsg     = document.getElementById('uploadMsg');
+const chunkCount    = document.getElementById('chunkCount');
+const refreshBtn    = document.getElementById('refreshBtn');
+const topK          = document.getElementById('topK');
+const threshold     = document.getElementById('threshold');
+const rerankTopN    = document.getElementById('rerankTopN');
+const messages      = document.getElementById('messages');
+const queryInput    = document.getElementById('queryInput');
+const sendBtn       = document.getElementById('sendBtn');
+const welcome       = document.getElementById('welcome');
 
-let selectedFile = null;
-let isLoading    = false;
+let pendingFile = null;
+let busy        = false;
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
+// ─── Stats ────────────────────────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const res  = await fetch(`${API}/api/stats`);
+    const res  = await fetch('/api/stats');
     const data = await res.json();
     chunkCount.textContent = data.indexed_chunks ?? '—';
   } catch {
-    chunkCount.textContent = 'ERR';
+    chunkCount.textContent = '?';
   }
 }
 
-refreshStats.addEventListener('click', loadStats);
+refreshBtn.addEventListener('click', loadStats);
 loadStats();
 
-// ── File upload ───────────────────────────────────────────────────────────────
-uploadArea.addEventListener('click', () => fileInput.click());
+// ─── File pick / drag-drop ────────────────────────────────────────────────────
+uploadZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => fileInput.files[0] && pickFile(fileInput.files[0]));
 
-uploadArea.addEventListener('dragover', (e) => {
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
   e.preventDefault();
-  uploadArea.classList.add('drag-over');
-});
-uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
-uploadArea.addEventListener('drop', (e) => {
-  e.preventDefault();
-  uploadArea.classList.remove('drag-over');
+  uploadZone.classList.remove('drag-over');
   const f = e.dataTransfer.files[0];
-  if (f && f.name.endsWith('.pdf')) setFile(f);
+  if (f && f.name.toLowerCase().endsWith('.pdf')) pickFile(f);
+  else showAlert('Only PDF files are accepted.', 'error');
 });
 
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) setFile(fileInput.files[0]);
-});
-
-function setFile(f) {
-  selectedFile = f;
-  uploadArea.classList.add('has-file');
-  uploadArea.querySelector('.upload-text').textContent = f.name;
+function pickFile(f) {
+  pendingFile = f;
+  uploadZone.classList.add('ready');
+  uploadName.textContent = f.name;
+  uploadName.classList.remove('hidden');
   uploadBtn.disabled = false;
+  clearAlert();
 }
 
+// ─── Upload ───────────────────────────────────────────────────────────────────
 uploadBtn.addEventListener('click', async () => {
-  if (!selectedFile || isLoading) return;
-
-  uploadBtn.disabled = true;
-  uploadBtn.querySelector('.btn-text').textContent = 'Uploading…';
+  if (!pendingFile || busy) return;
+  busy = true;
+  uploadBtn.disabled    = true;
+  uploadBtnText.textContent = 'Uploading…';
   uploadSpinner.classList.remove('hidden');
-  showStatus('', '');
+  clearAlert();
 
   const form = new FormData();
-  form.append('file', selectedFile);
+  form.append('file', pendingFile);
 
   try {
-    const res  = await fetch(`${API}/api/ingest`, { method: 'POST', body: form });
+    const res  = await fetch('/api/ingest', { method: 'POST', body: form });
     const data = await res.json();
 
     if (!res.ok) {
-      showStatus(`Error: ${data.detail || res.statusText}`, 'error');
+      showAlert(`Error: ${data.detail || res.statusText}`, 'error');
     } else {
-      showStatus(
-        `✓ ${data.filename}\n${data.chunks_stored} chunks indexed (${data.pages} pages)`,
-        'success'
+      showAlert(
+        `✓ ${data.filename}\n${data.chunks_stored} chunks indexed · ${data.pages} pages`,
+        'success',
       );
       loadStats();
     }
   } catch (err) {
-    showStatus(`Network error: ${err.message}`, 'error');
+    showAlert(`Network error: ${err.message}`, 'error');
   } finally {
+    busy = false;
     uploadBtn.disabled = false;
-    uploadBtn.querySelector('.btn-text').textContent = 'Upload & Index';
+    uploadBtnText.textContent = 'Upload & Index';
     uploadSpinner.classList.add('hidden');
-    selectedFile = null;
+    pendingFile = null;
     fileInput.value = '';
-    uploadArea.classList.remove('has-file');
-    uploadArea.querySelector('.upload-text').textContent = 'Click or drag a PDF here';
+    uploadZone.classList.remove('ready');
+    uploadName.classList.add('hidden');
   }
 });
 
-function showStatus(msg, type) {
-  if (!msg) { uploadStatus.classList.add('hidden'); return; }
-  uploadStatus.textContent = msg;
-  uploadStatus.className   = `status-msg ${type}`;
+function showAlert(msg, type) {
+  uploadMsg.textContent = msg;
+  uploadMsg.className   = `alert ${type}`;
+}
+function clearAlert() {
+  uploadMsg.textContent = '';
+  uploadMsg.className   = 'alert hidden';
 }
 
-// ── Chat ──────────────────────────────────────────────────────────────────────
-queryInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+queryInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
-
-sendBtn.addEventListener('click', sendMessage);
-
 queryInput.addEventListener('input', () => {
   queryInput.style.height = 'auto';
   queryInput.style.height = queryInput.scrollHeight + 'px';
 });
+sendBtn.addEventListener('click', sendMessage);
 
-function setQuery(text) {
+function fillQuery(text) {
   queryInput.value = text;
   queryInput.dispatchEvent(new Event('input'));
   queryInput.focus();
 }
-window.setQuery = setQuery;
+window.fillQuery = fillQuery;
 
 async function sendMessage() {
   const query = queryInput.value.trim();
-  if (!query || isLoading) return;
+  if (!query || busy) return;
 
-  // Remove welcome screen
-  const welcome = messagesEl.querySelector('.welcome-msg');
-  if (welcome) welcome.remove();
+  welcome?.remove();
 
-  appendUserMessage(query);
+  appendUser(query);
   queryInput.value = '';
   queryInput.style.height = 'auto';
+  busy = true;
   sendBtn.disabled = true;
-  isLoading        = true;
 
   const typingId = appendTyping();
 
   try {
-    const res = await fetch(`${API}/api/chat`, {
+    const res = await fetch('/api/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -153,142 +149,118 @@ async function sendMessage() {
       }),
     });
 
-    removeTyping(typingId);
+    removeEl(typingId);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      appendErrorMessage(err.detail || 'Request failed.');
+      appendError(err.detail || 'Request failed.');
     } else {
-      const data = await res.json();
-      appendAIMessage(data);
+      appendAnswer(await res.json());
     }
   } catch (err) {
-    removeTyping(typingId);
-    appendErrorMessage(`Network error: ${err.message}`);
+    removeEl(typingId);
+    appendError(`Network error: ${err.message}`);
   } finally {
+    busy = false;
     sendBtn.disabled = false;
-    isLoading        = false;
-    scrollToBottom();
+    scrollEnd();
   }
 }
 
-// ── Message builders ──────────────────────────────────────────────────────────
-function appendUserMessage(text) {
-  const el = document.createElement('div');
-  el.className = 'message user';
-  el.innerHTML = `
-    <div class="avatar">👤</div>
-    <div class="bubble">${escapeHtml(text)}</div>
-  `;
-  messagesEl.appendChild(el);
-  scrollToBottom();
+// ─── Message builders ─────────────────────────────────────────────────────────
+function appendUser(text) {
+  const el = div('msg user');
+  el.innerHTML = `<div class="avatar">👤</div><div class="bubble">${esc(text)}</div>`;
+  messages.appendChild(el);
+  scrollEnd();
 }
 
-let typingCounter = 0;
-
+let _tid = 0;
 function appendTyping() {
-  const id = `typing-${++typingCounter}`;
-  const el = document.createElement('div');
-  el.className = 'message ai';
+  const id = `t${++_tid}`;
+  const el = div('msg ai');
   el.id = id;
   el.innerHTML = `
     <div class="avatar">⚖️</div>
     <div class="bubble">
-      <div class="typing">
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-      </div>
-    </div>
-  `;
-  messagesEl.appendChild(el);
-  scrollToBottom();
+      <div class="typing"><div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div></div>
+    </div>`;
+  messages.appendChild(el);
+  scrollEnd();
   return id;
 }
 
-function removeTyping(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
-}
+function appendAnswer(data) {
+  const sid = `s${Date.now()}`;
+  const hasSrc = data.sources && data.sources.length > 0;
 
-function appendAIMessage(data) {
-  const el = document.createElement('div');
-  el.className = 'message ai';
-
-  const sourcesId = `src-${Date.now()}`;
-  const hasSources = data.sources && data.sources.length > 0;
-
+  const el = div('msg ai');
   el.innerHTML = `
     <div class="avatar">⚖️</div>
     <div class="bubble">
-      <div class="answer-text">${escapeHtml(data.answer)}</div>
-      <div class="pipeline-meta">
-        <span class="meta-tag">🔍 ${data.embeddings_used} embeddings</span>
-        <span class="meta-tag">📄 ${data.chunks_retrieved} retrieved</span>
-        <span class="meta-tag">🏆 ${data.chunks_after_rerank} reranked</span>
+      <div class="answer-text">${esc(data.answer)}</div>
+      <div class="pipeline-tags">
+        <span class="ptag">🔍 ${data.embeddings_used} embeddings</span>
+        <span class="ptag">📄 ${data.chunks_retrieved} retrieved</span>
+        <span class="ptag">🏆 ${data.chunks_after_rerank} reranked</span>
       </div>
-      ${hasSources ? `
-        <div class="sources-toggle" onclick="toggleSources('${sourcesId}', this)">
-          <span class="toggle-arrow">▶</span>
-          ${data.sources.length} source${data.sources.length > 1 ? 's' : ''}
-        </div>
-        <div class="sources-list" id="${sourcesId}">
-          ${data.sources.map(buildSourceCard).join('')}
-        </div>
-      ` : ''}
-    </div>
-  `;
+      ${hasSrc ? `
+        <button class="sources-btn" onclick="toggleSrc('${sid}',this)">
+          <span class="s-arrow">▶</span> ${data.sources.length} source${data.sources.length > 1 ? 's' : ''}
+        </button>
+        <div class="sources-list" id="${sid}">
+          ${data.sources.map(buildSource).join('')}
+        </div>` : ''}
+    </div>`;
 
-  messagesEl.appendChild(el);
-  scrollToBottom();
+  messages.appendChild(el);
+  scrollEnd();
 }
 
-function buildSourceCard(src) {
-  const title = [src.article, src.law_number, src.document_name]
-    .filter(Boolean).join(' · ') || src.chunk_id;
-
+function buildSource(src) {
+  const title = [src.article, src.law_number, src.document_name].filter(Boolean).join(' · ') || src.chunk_id;
   return `
     <div class="source-card">
-      <div class="source-header">
-        <div class="source-title">${escapeHtml(title)}</div>
-        <div class="source-badges">
+      <div class="sc-header">
+        <div class="sc-title">${esc(title)}</div>
+        <div class="sc-badges">
           <span class="badge badge-sim">sim ${src.similarity.toFixed(2)}</span>
-          <span class="badge badge-rerank">rank ${src.rerank_score.toFixed(1)}</span>
+          <span class="badge badge-rank">rank ${src.rerank_score.toFixed(1)}</span>
         </div>
       </div>
-      <div class="source-excerpt">${escapeHtml(src.excerpt)}…</div>
-    </div>
-  `;
+      <div class="sc-excerpt">${esc(src.excerpt)}…</div>
+    </div>`;
 }
 
-function appendErrorMessage(msg) {
+function appendError(msg) {
+  const el = div('msg ai');
+  el.innerHTML = `<div class="avatar">⚖️</div><div class="error-bubble">⚠️ ${esc(msg)}</div>`;
+  messages.appendChild(el);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function toggleSrc(id, btn) {
+  document.getElementById(id).classList.toggle('open');
+  btn.querySelector('.s-arrow').classList.toggle('open');
+}
+window.toggleSrc = toggleSrc;
+
+function div(cls) {
   const el = document.createElement('div');
-  el.className = 'message ai';
-  el.innerHTML = `
-    <div class="avatar">⚖️</div>
-    <div class="error-bubble">⚠️ ${escapeHtml(msg)}</div>
-  `;
-  messagesEl.appendChild(el);
+  el.className = cls;
+  return el;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function toggleSources(id, btn) {
-  const list  = document.getElementById(id);
-  const arrow = btn.querySelector('.toggle-arrow');
-  list.classList.toggle('visible');
-  arrow.classList.toggle('open');
-}
-window.toggleSources = toggleSources;
-
-function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function removeEl(id) {
+  document.getElementById(id)?.remove();
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function scrollEnd() {
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

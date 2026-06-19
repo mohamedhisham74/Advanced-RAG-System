@@ -1,6 +1,6 @@
 """
-Ingest endpoint — upload PDFs and run the full ingestion pipeline:
-    pdf_loader → chunker → embedder → store in pgvector
+POST /api/ingest — upload a PDF and run the full ingestion pipeline:
+    load_pdf → chunk_all_documents → embed_chunks → store_chunks
 """
 
 from __future__ import annotations
@@ -19,49 +19,43 @@ from app.rag.embedder import embed_chunks, store_chunks
 from app.rag.pdf_loader import load_pdf
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["ingest"])
 
 
 class IngestResponse(BaseModel):
-    filename: str
-    document_name: str
-    law_number: str
-    pages: int
+    filename:       str
+    document_name:  str
+    law_number:     str
+    pages:          int
     chunks_created: int
-    chunks_stored: int
+    chunks_stored:  int
 
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
+    db:   AsyncSession = Depends(get_db),
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=422, detail="Only PDF files are accepted.")
 
     logger.info("Ingesting: %s", file.filename)
 
-    # Save uploaded file to a temp location
+    # Write upload to a temp file so PyMuPDF can open it
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        content = await file.read()
-        tmp.write(content)
+        tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        # Load & parse
         document = load_pdf(tmp_path)
-        document["source_file"] = file.filename
+        document["source_file"] = file.filename   # preserve original filename
 
-        # Chunk
         chunks = await chunk_all_documents([document])
         if not chunks:
             raise HTTPException(status_code=422, detail="No chunks produced from this PDF.")
 
-        # Embed
         embedded = await embed_chunks(chunks)
-
-        # Store
-        stored = await store_chunks(embedded, db)
+        stored   = await store_chunks(embedded, db)
 
     except HTTPException:
         raise

@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_db
 from app.rag.embedder import count_chunks
-from app.core.database import get_db
 
-router = APIRouter()
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
@@ -12,8 +13,6 @@ async def health():
 
 
 @router.get("/stats")
-async def stats():
-    """Return the number of indexed chunks."""
-    async for db in get_db():
-        total = await count_chunks(db)
-        return {"indexed_chunks": total}
+async def stats(db: AsyncSession = Depends(get_db)):
+    total = await count_chunks(db)
+    return {"indexed_chunks": total}

@@ -1,12 +1,13 @@
 """
 FastAPI application entry point.
 
-Routes:
-    GET  /api/health       — liveness probe
-    GET  /api/stats        — indexed chunk count
-    POST /api/chat         — Advanced RAG query
-    POST /api/ingest       — PDF upload & ingestion
-    GET  /                 — Serve frontend (index.html)
+API routes  (prefix /api):
+    GET  /api/health    liveness probe
+    GET  /api/stats     indexed chunk count
+    POST /api/ingest    PDF upload & ingestion pipeline
+    POST /api/chat      Advanced RAG query pipeline
+
+Static frontend served from /static at root URL /.
 """
 
 from __future__ import annotations
@@ -39,9 +40,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router, prefix="/api", tags=["health"])
-app.include_router(chat.router, prefix="/api", tags=["chat"])
-app.include_router(ingest.router, prefix="/api", tags=["ingest"])
+app.include_router(health.router, prefix="/api")
+app.include_router(chat.router,   prefix="/api")
+app.include_router(ingest.router, prefix="/api")
 
-# Serve static frontend at /
+# Serve the HTML/CSS/JS frontend at /
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

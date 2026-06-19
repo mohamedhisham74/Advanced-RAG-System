@@ -1,5 +1,10 @@
-"""FastAPI shared dependencies."""
+from collections.abc import AsyncGenerator
 
-from app.core.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["get_db"]
+from app.core.database import AsyncSessionLocal
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session

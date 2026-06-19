@@ -1,6 +1,6 @@
 """
-Chat endpoint — full Advanced RAG pipeline:
-    query_enhancer → retriever → reranker → generator
+POST /api/chat — full Advanced RAG pipeline:
+    enhance_query → retrieve_multi → rerank_chunks → generate_answer
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -19,61 +19,58 @@ from app.rag.reranker import rerank_chunks
 from app.rag.retriever import retrieve_multi
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["chat"])
 
 
 class ChatRequest(BaseModel):
-    query: str
-    top_k: int = settings.rag_top_k
-    threshold: float = settings.rag_similarity_threshold
-    rerank_top_n: int = settings.rag_rerank_top_n
+    query:        str   = Field(..., min_length=1, max_length=2000)
+    top_k:        int   = Field(default=settings.rag_top_k, ge=1, le=20)
+    threshold:    float = Field(default=settings.rag_similarity_threshold, ge=0.0, le=1.0)
+    rerank_top_n: int   = Field(default=settings.rag_rerank_top_n, ge=1, le=10)
 
 
 class SourceItem(BaseModel):
-    chunk_id: str
+    chunk_id:      str
     document_name: str
-    law_number: str
-    article: str
-    section: str
-    similarity: float
-    rerank_score: float
-    excerpt: str
+    law_number:    str
+    article:       str
+    section:       str
+    similarity:    float
+    rerank_score:  float
+    excerpt:       str
 
 
 class ChatResponse(BaseModel):
-    query: str
-    answer: str
-    sources: list[SourceItem]
-    embeddings_used: int
-    chunks_retrieved: int
+    query:               str
+    answer:              str
+    sources:             list[SourceItem]
+    embeddings_used:     int
+    chunks_retrieved:    int
     chunks_after_rerank: int
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     query = req.query.strip()
-    if not query:
-        raise HTTPException(status_code=422, detail="Query cannot be empty.")
+    logger.info("Chat: %r", query[:80])
 
-    logger.info("Chat request: %r", query[:80])
-
-    # Step 1: Query enhancement (multi-query embeddings)
+    # 1. Query enhancement
     embeddings = await enhance_query(query)
     if not embeddings:
         raise HTTPException(status_code=500, detail="Failed to embed query.")
 
-    # Step 2: Multi-embedding retrieval
+    # 2. Multi-embedding retrieval
     raw_chunks = await retrieve_multi(
         query_embeddings=embeddings,
-        db_session=db,
+        db=db,
         top_k=req.top_k,
         threshold=req.threshold,
     )
 
-    # Step 3: LLM reranking
+    # 3. LLM reranking
     reranked = await rerank_chunks(query, raw_chunks, top_n=req.rerank_top_n)
 
-    # Step 4: Answer generation
+    # 4. Answer generation
     result = await generate_answer(query, reranked)
 
     return ChatResponse(

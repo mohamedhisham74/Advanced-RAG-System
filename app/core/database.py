@@ -1,8 +1,3 @@
-"""
-Async SQLAlchemy engine and session factory.
-Provides get_db dependency for FastAPI routes.
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
@@ -15,6 +10,7 @@ engine = create_async_engine(
     settings.database_url,
     pool_size=5,
     max_overflow=10,
+    pool_pre_ping=True,
     echo=settings.debug,
 )
 
